@@ -17,11 +17,22 @@ export const Navbar = () => {
           <span className="navbar-brand mb-0 h1">React Boilerplate</span>
         </Link>
         <div className="ml-auto d-flex gap-2">
+          {/* Botón de demo */}
           <Link to="/demo">
             <button className="btn btn-secondary">Context demo</button>
           </Link>
 
-          {!store.token ? (
+          {/* Si hay token, mostrar Agenda + Logout */}
+          {store.token ? (
+            <>
+              <Link to="/agenda">
+                <button className="btn btn-outline-primary">Agenda</button>
+              </Link>
+              <button className="btn btn-danger" onClick={handleLogout}>
+                Logout
+              </button>
+            </>
+          ) : (
             <>
               <Link to="/login">
                 <button className="btn btn-primary">Login</button>
@@ -30,10 +41,6 @@ export const Navbar = () => {
                 <button className="btn btn-outline-primary">Sign up</button>
               </Link>
             </>
-          ) : (
-            <button className="btn btn-danger" onClick={handleLogout}>
-              Logout
-            </button>
           )}
         </div>
       </div>

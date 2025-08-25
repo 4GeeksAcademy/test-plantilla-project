@@ -7,6 +7,9 @@ from api.utils import APIException
 from flask_cors import CORS
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from datetime import timedelta
+from datetime import datetime
+from api.models import Event
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 api = Blueprint('api', __name__)
 
@@ -71,3 +74,63 @@ def private():
         raise APIException("User not found", 404)
 
     return jsonify({"msg": f"Welcome, {user.email}!", "user": user.serialize()}), 200
+
+
+def _uid() -> int:
+    uid = get_jwt_identity()
+    try: return int(uid)
+    except: raise APIException("Invalid token subject", 401)
+
+@api.route('/events', methods=['GET'])
+@jwt_required()
+def list_events():
+    uid = _uid()
+    items = Event.query.filter_by(user_id=uid).order_by(Event.start.asc()).all()
+    return jsonify([e.serialize() for e in items]), 200
+
+@api.route('/events', methods=['POST'])
+@jwt_required()
+def create_event():
+    uid = _uid()
+    data = request.get_json() or {}
+    try:
+        start = datetime.fromisoformat(data['start'])
+        end = datetime.fromisoformat(data['end'])
+    except Exception:
+        raise APIException("Invalid date format. Use ISO 8601.", 400)
+
+    ev = Event(
+        user_id=uid,
+        title=(data.get('title') or '').strip() or 'Evento',
+        start=start, end=end,
+        all_day=bool(data.get('allDay', False)),
+        color=data.get('color'),
+        notes=data.get('notes')
+    )
+    db.session.add(ev); db.session.commit()
+    return jsonify(ev.serialize()), 201
+
+@api.route('/events/<int:event_id>', methods=['PUT'])
+@jwt_required()
+def update_event(event_id):
+    uid = _uid()
+    ev = Event.query.filter_by(id=event_id, user_id=uid).first()
+    if not ev: raise APIException("Event not found", 404)
+    data = request.get_json() or {}
+    if 'title' in data: ev.title = data['title']
+    if 'start' in data: ev.start = datetime.fromisoformat(data['start'])
+    if 'end'   in data: ev.end   = datetime.fromisoformat(data['end'])
+    if 'allDay' in data: ev.all_day = bool(data['allDay'])
+    if 'color' in data: ev.color = data['color']
+    if 'notes' in data: ev.notes = data['notes']
+    db.session.commit()
+    return jsonify(ev.serialize()), 200
+
+@api.route('/events/<int:event_id>', methods=['DELETE'])
+@jwt_required()
+def delete_event(event_id):
+    uid = _uid()
+    ev = Event.query.filter_by(id=event_id, user_id=uid).first()
+    if not ev: raise APIException("Event not found", 404)
+    db.session.delete(ev); db.session.commit()
+    return jsonify({"msg":"deleted"}), 200

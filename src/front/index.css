@@ -1,0 +1,38 @@
+
+/* Fondo general */
+body { background: #f7f8fa; }
+
+/* Tarjetas redondeadas uniformes */
+.rounded-4 { border-radius: 1rem; }
+
+/* React Big Calendar – look limpio */
+.rbc-calendar {
+  background: #fff;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+.rbc-toolbar {
+  padding: 8px 12px;
+  gap: 8px;
+}
+.rbc-toolbar button {
+  border-radius: 10px;
+  padding: 6px 12px;
+}
+.rbc-month-view, .rbc-time-view, .rbc-agenda-view {
+  border-color: #eef0f3;
+}
+.rbc-header {
+  background: #fafbfc;
+  border: 0;
+  border-bottom: 1px solid #eef0f3;
+  padding: 8px 0;
+  text-transform: capitalize;
+}
+.rbc-today { background: #f0f6ff; }
+.rbc-off-range-bg { background: #fafafa; }
+.rbc-date-cell { padding: 6px 8px; }
+.rbc-event {
+  border-radius: 8px;
+  padding: 2px 4px;
+}
