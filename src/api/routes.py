@@ -1,30 +1,62 @@
 """
-This module takes care of starting the API Server, Loading the DB and Adding the endpoints
+API routes: auth (signup/login), private, events CRUD, tasks CRUD.
 """
 from flask import request, jsonify, Blueprint
-from api.models import db, User
+from flask_cors import cross_origin
+from api.models import db, User, Event, Task
 from api.utils import APIException
-from flask_cors import CORS
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from datetime import timedelta
-from datetime import datetime
-from api.models import Event
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from datetime import datetime, timedelta, date
 
 api = Blueprint('api', __name__)
 
-CORS(api)
+# -------------------- Helpers --------------------
+
+def _uid() -> int:
+    identity = get_jwt_identity()
+    try:
+        return int(identity)
+    except (TypeError, ValueError):
+        raise APIException("Invalid token subject", 401)
+
+def parse_iso(dt: str) -> datetime:
+    if not isinstance(dt, str):
+        raise APIException("Invalid date", 400)
+    if dt.endswith("Z"):
+        dt = dt[:-1] + "+00:00"
+    try:
+        d = datetime.fromisoformat(dt)
+        if d.tzinfo is not None:
+            d = d.astimezone(tz=None).replace(tzinfo=None)
+        return d
+    except Exception:
+        raise APIException("Invalid date format. Use ISO 8601.", 400)
+
+def _parse_date_yyyy_mm_dd(s: str) -> date:
+    if s in (None, ""):
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        raise APIException("Invalid date (expected YYYY-MM-DD)", 400)
+
+# -------------------- Demo --------------------
 
 @api.route('/hello', methods=['GET'])
 def handle_hello():
-    response_body = {
+    return jsonify({
         "message": "Hello! I'm a message that came from the backend, check the network tab on the google inspector and you will see the GET request"
-    }
-    return jsonify(response_body), 200
+    }), 200
 
+# -------------------- Auth --------------------
 
-@api.route('/signup', methods=['POST'])
+@api.route('/signup', methods=['POST', 'OPTIONS'])
+@cross_origin(origins="*", methods=["POST", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
 def signup():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     data = request.get_json() or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password')
@@ -36,15 +68,20 @@ def signup():
         raise APIException("User already exists", 409)
 
     user = User(email=email, is_active=True)
-    user.set_password(password)  # guarda hash
+    user.set_password(password)
     db.session.add(user)
     db.session.commit()
 
     return jsonify({"msg": "User created successfully"}), 201
 
 
-@api.route('/token', methods=['POST'])
+@api.route('/token', methods=['POST', 'OPTIONS'])
+@cross_origin(origins="*", methods=["POST", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
 def login():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     data = request.get_json() or {}
     email = (data.get('email') or '').strip().lower()
     password = data.get('password')
@@ -62,75 +99,170 @@ def login():
 
 @api.route('/private', methods=['GET'])
 @jwt_required()
+@cross_origin(origins="*", methods=["GET"], allow_headers=["Content-Type", "Authorization"])
 def private():
-    user_id = get_jwt_identity()  # viene como string porque así lo generamos
-    try:
-        user_id = int(user_id)
-    except (TypeError, ValueError):
-        raise APIException("Invalid token subject", 401)
-
+    user_id = _uid()
     user = User.query.get(user_id)
     if not user:
         raise APIException("User not found", 404)
-
     return jsonify({"msg": f"Welcome, {user.email}!", "user": user.serialize()}), 200
 
+# -------------------- Events CRUD --------------------
 
-def _uid() -> int:
-    uid = get_jwt_identity()
-    try: return int(uid)
-    except: raise APIException("Invalid token subject", 401)
+@api.route('/events', methods=['GET', 'POST', 'OPTIONS'])
+@cross_origin(origins="*", methods=["GET", "POST", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
+@jwt_required(optional=True)  # el preflight/GET sin token no debería bloquear en DEV; si quieres exigir token, quita 'optional'
+def events_collection():
+    if request.method == "OPTIONS":
+        return ("", 204)
 
-@api.route('/events', methods=['GET'])
-@jwt_required()
-def list_events():
-    uid = _uid()
-    items = Event.query.filter_by(user_id=uid).order_by(Event.start.asc()).all()
-    return jsonify([e.serialize() for e in items]), 200
+    if request.method == "GET":
+        uid = _uid()
+        items = Event.query.filter_by(user_id=uid).order_by(Event.start.asc()).all()
+        return jsonify([e.serialize() for e in items]), 200
 
-@api.route('/events', methods=['POST'])
-@jwt_required()
-def create_event():
+    # POST
     uid = _uid()
     data = request.get_json() or {}
+    title = (data.get('title') or '').strip()
+    if not title:
+        raise APIException("Title is required", 400)
+
     try:
-        start = datetime.fromisoformat(data['start'])
-        end = datetime.fromisoformat(data['end'])
-    except Exception:
-        raise APIException("Invalid date format. Use ISO 8601.", 400)
+        start = parse_iso(data['start'])
+        end = parse_iso(data['end'])
+    except KeyError:
+        raise APIException("start and end are required", 400)
+
+    if end <= start:
+        raise APIException("end must be greater than start", 400)
 
     ev = Event(
         user_id=uid,
-        title=(data.get('title') or '').strip() or 'Evento',
-        start=start, end=end,
+        title=title,
+        start=start,
+        end=end,
         all_day=bool(data.get('allDay', False)),
         color=data.get('color'),
         notes=data.get('notes')
     )
-    db.session.add(ev); db.session.commit()
+    db.session.add(ev)
+    db.session.commit()
     return jsonify(ev.serialize()), 201
 
-@api.route('/events/<int:event_id>', methods=['PUT'])
+
+@api.route('/events/<int:event_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+@cross_origin(origins="*", methods=["PUT", "DELETE", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
 @jwt_required()
-def update_event(event_id):
+def event_item(event_id):
+    if request.method == "OPTIONS":
+        return ("", 204)
+
     uid = _uid()
     ev = Event.query.filter_by(id=event_id, user_id=uid).first()
-    if not ev: raise APIException("Event not found", 404)
+    if not ev:
+        raise APIException("Event not found", 404)
+
+    if request.method == "DELETE":
+        db.session.delete(ev)
+        db.session.commit()
+        return jsonify({"msg": "deleted"}), 200
+
+    # PUT
     data = request.get_json() or {}
-    if 'title' in data: ev.title = data['title']
-    if 'start' in data: ev.start = datetime.fromisoformat(data['start'])
-    if 'end'   in data: ev.end   = datetime.fromisoformat(data['end'])
-    if 'allDay' in data: ev.all_day = bool(data['allDay'])
-    if 'color' in data: ev.color = data['color']
-    if 'notes' in data: ev.notes = data['notes']
+
+    if 'title' in data:
+        title = (data.get('title') or '').strip()
+        if not title:
+            raise APIException("Title cannot be empty", 400)
+        ev.title = title
+
+    if 'start' in data:
+        ev.start = parse_iso(data['start'])
+    if 'end' in data:
+        ev.end = parse_iso(data['end'])
+    if ('start' in data) or ('end' in data):
+        if ev.end <= ev.start:
+            raise APIException("end must be greater than start", 400)
+
+    if 'allDay' in data:
+        ev.all_day = bool(data['allDay'])
+    if 'color' in data:
+        ev.color = data['color']
+    if 'notes' in data:
+        ev.notes = data['notes']
+
     db.session.commit()
     return jsonify(ev.serialize()), 200
 
-@api.route('/events/<int:event_id>', methods=['DELETE'])
-@jwt_required()
-def delete_event(event_id):
+# -------------------- Tasks CRUD --------------------
+
+@api.route('/tasks', methods=['GET', 'POST', 'OPTIONS'])
+@cross_origin(origins="*", methods=["GET", "POST", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
+@jwt_required(optional=True)
+def tasks_collection():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    if request.method == "GET":
+        uid = _uid()
+        q = Task.query.filter_by(user_id=uid).order_by(Task.id.desc())
+        d = request.args.get("date")
+        if d:
+            the_day = _parse_date_yyyy_mm_dd(d)
+            q = q.filter(Task.date == the_day)
+        items = q.all()
+        return jsonify([t.serialize() for t in items]), 200
+
+    # POST
     uid = _uid()
-    ev = Event.query.filter_by(id=event_id, user_id=uid).first()
-    if not ev: raise APIException("Event not found", 404)
-    db.session.delete(ev); db.session.commit()
-    return jsonify({"msg":"deleted"}), 200
+    data = request.get_json() or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise APIException("Title is required", 400)
+    task_date = _parse_date_yyyy_mm_dd(data.get("date")) if "date" in data else None
+
+    t = Task(user_id=uid, title=title, done=bool(data.get("done", False)), date=task_date)
+    db.session.add(t)
+    db.session.commit()
+    return jsonify(t.serialize()), 201
+
+
+@api.route('/tasks/<int:task_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+@cross_origin(origins="*", methods=["PUT", "DELETE", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
+@jwt_required()
+def task_item(task_id):
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    uid = _uid()
+    t = Task.query.filter_by(id=task_id, user_id=uid).first()
+    if not t:
+        raise APIException("Task not found", 404)
+
+    if request.method == "DELETE":
+        db.session.delete(t)
+        db.session.commit()
+        return jsonify({"msg": "deleted"}), 200
+
+    # PUT
+    data = request.get_json() or {}
+
+    if "title" in data:
+        title = (data.get("title") or "").strip()
+        if not title:
+            raise APIException("Title cannot be empty", 400)
+        t.title = title
+
+    if "done" in data:
+        t.done = bool(data.get("done"))
+
+    if "date" in data:
+        t.date = _parse_date_yyyy_mm_dd(data["date"]) if data["date"] else None
+
+    db.session.commit()
+    return jsonify(t.serialize()), 200
