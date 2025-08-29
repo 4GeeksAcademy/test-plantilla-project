@@ -106,6 +106,14 @@ export default function Agenda() {
   const [taskDetail, setTaskDetail] = useState(null);
   const [taskMutating, setTaskMutating] = useState(false);
 
+  // ---- EDICIÓN TAREA ----
+  const [showTaskEdit, setShowTaskEdit] = useState(false);
+  const [taskEditId, setTaskEditId] = useState(null);
+  const [taskEditTitle, setTaskEditTitle] = useState("");
+  const [taskEditDate, setTaskEditDate] = useState(""); // YYYY-MM-DD
+  const [taskEditSaving, setTaskEditSaving] = useState(false);
+  const [taskEditError, setTaskEditError] = useState("");
+
   // ------- LOAD DATA -------
   const loadEvents = async () => {
     const res = await apiFetch("/api/events");
@@ -272,6 +280,12 @@ export default function Agenda() {
   };
 
   // ---------- Eliminar evento ----------
+  const deleteEventById = async (id) => {
+    if (!confirm("¿Eliminar este evento?")) return;
+    await apiFetch(`/api/events/${id}`, { method: "DELETE" });
+    await loadAll();
+  };
+
   const deleteCurrentEvent = async () => {
     if (!detailEvent) return;
     if (!confirm(`¿Eliminar "${detailEvent.title}"?`)) return;
@@ -360,38 +374,58 @@ export default function Agenda() {
     }
   };
 
-  // ---------- Detalle TAREA: toggle & delete ----------
-  const toggleDoneTask = async () => {
-    if (!taskDetail) return;
-    setTaskMutating(true);
+  // ---------- TAREAS: toggle / delete / edit ----------
+  const toggleDoneTask = async (task) => {
+    const id = task?.id ?? taskDetail?.id;
+    const next = !(task?.taskDone ?? taskDetail?.taskDone);
+    await apiFetch(`/api/tasks/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ done: next })
+    });
+    await loadAll();
+    setShowTaskInfo(false);
+    setTaskDetail(null);
+  };
+
+  const deleteTask = async (task) => {
+    const id = task?.id ?? taskDetail?.id;
+    if (!confirm("¿Eliminar esta tarea?")) return;
+    await apiFetch(`/api/tasks/${id}`, { method: "DELETE" });
+    await loadAll();
+    setShowTaskInfo(false);
+    setTaskDetail(null);
+  };
+
+  const openEditTask = (task) => {
+    setTaskEditId(task.id);
+    setTaskEditTitle(task.title);
+    setTaskEditDate(ymd(task.start));
+    setTaskEditError("");
+    setShowTaskEdit(true);
+  };
+
+  const saveEditTask = async () => {
+    setTaskEditError("");
+    if (!taskEditTitle.trim()) {
+      setTaskEditError("El título no puede estar vacío.");
+      return;
+    }
+    setTaskEditSaving(true);
     try {
-      const res = await apiFetch(`/api/tasks/${taskDetail.id}`, {
+      const res = await apiFetch(`/api/tasks/${taskEditId}`, {
         method: "PUT",
-        body: JSON.stringify({ done: !taskDetail.taskDone })
+        body: JSON.stringify({ title: taskEditTitle.trim(), date: taskEditDate })
       });
       if (res?.ok) {
         await loadAll();
-        setShowTaskInfo(false);
-        setTaskDetail(null);
+        setShowTaskEdit(false);
+        setTaskEditId(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setTaskEditError(data?.message || "No se pudo guardar la tarea.");
       }
     } finally {
-      setTaskMutating(false);
-    }
-  };
-
-  const deleteTask = async () => {
-    if (!taskDetail) return;
-    if (!confirm(`¿Eliminar tarea "${taskDetail.title}"?`)) return;
-    setTaskMutating(true);
-    try {
-      const res = await apiFetch(`/api/tasks/${taskDetail.id}`, { method: "DELETE" });
-      if (res?.ok) {
-        await loadAll();
-        setShowTaskInfo(false);
-        setTaskDetail(null);
-      }
-    } finally {
-      setTaskMutating(false);
+      setTaskEditSaving(false);
     }
   };
 
@@ -453,9 +487,19 @@ export default function Agenda() {
               {[...events]
                 .filter(e => isSameDay(e.start, new Date()))
                 .map(e => (
-                  <div key={`ev-hoy-${e.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center gap-2">
-                    <span style={{ width: 10, height: 10, borderRadius: 3, background: e.color || "#3f51b5" }} />
-                    {format(new Date(e.start), "HH:mm")} — {e.title}
+                  <div key={`ev-hoy-${e.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                    <div className="d-flex align-items-center gap-2">
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: e.color || "#3f51b5" }} />
+                      <span>{format(new Date(e.start), "HH:mm")} — {e.title}</span>
+                    </div>
+                    <div className="d-flex gap-1">
+                      <button className="btn btn-sm btn-outline-primary" title="Editar" onClick={() => { setDetailEvent(e); setEditing(true); setShowDetail(true); setEditTitle(e.title); setEditStartTime(hhmmFromDate(new Date(e.start))); setEditEndTime(hhmmFromDate(new Date(e.end))); setEditColor(e.color || "#3f51b5"); setEditNotes(e.notes || ""); }}>
+                        ✏️
+                      </button>
+                      <button className="btn btn-sm btn-outline-danger" title="Eliminar" onClick={() => deleteEventById(e.id)}>
+                        🗑️
+                      </button>
+                    </div>
                   </div>
                 ))}
               {[...events].filter(e => isSameDay(e.start, new Date())).length === 0 && (
@@ -467,14 +511,24 @@ export default function Agenda() {
               {[...tasks]
                 .filter(t => isSameDay(t.start, new Date()))
                 .map(t => (
-                  <div
-                    key={`tk-hoy-${t.id}`}
-                    className="small border rounded px-2 py-1 mb-2 d-flex align-items-center gap-2"
-                    title={t.taskDone ? "Hecha" : "Pendiente"}
-                    style={{ textDecoration: t.taskDone ? "line-through" : "none", fontStyle: t.taskDone ? "italic" : "normal" }}
-                  >
-                    <span style={{ width: 10, height: 10, borderRadius: 3, background: t.color || "#9aa0a6" }} />
-                    {t.title}
+                  <div key={`tk-hoy-${t.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                    <div className="d-flex align-items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        checked={!!t.taskDone}
+                        onChange={() => toggleDoneTask(t)}
+                        title={t.taskDone ? "Marcar pendiente" : "Marcar hecha"}
+                      />
+                      <span style={{
+                        textDecoration: t.taskDone ? "line-through" : "none",
+                        fontStyle: t.taskDone ? "italic" : "normal"
+                      }}>{t.title}</span>
+                    </div>
+                    <div className="d-flex gap-1">
+                      <button className="btn btn-sm btn-outline-primary" title="Editar" onClick={() => openEditTask(t)}>✏️</button>
+                      <button className="btn btn-sm btn-outline-danger" title="Eliminar" onClick={() => deleteTask(t)}>🗑️</button>
+                    </div>
                   </div>
                 ))}
               {[...tasks].filter(t => isSameDay(t.start, new Date())).length === 0 && (
@@ -493,9 +547,19 @@ export default function Agenda() {
               {[...events]
                 .filter(e => inThisWeek(e.start))
                 .map(e => (
-                  <div key={`ev-week-${e.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center gap-2">
-                    <span style={{ width: 10, height: 10, borderRadius: 3, background: e.color || "#3f51b5" }} />
-                    {format(new Date(e.start), "eee dd HH:mm", { locale: es })} — {e.title}
+                  <div key={`ev-week-${e.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                    <div className="d-flex align-items-center gap-2">
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: e.color || "#3f51b5" }} />
+                      <span>{format(new Date(e.start), "eee dd HH:mm", { locale: es })} — {e.title}</span>
+                    </div>
+                    <div className="d-flex gap-1">
+                      <button className="btn btn-sm btn-outline-primary" title="Editar" onClick={() => { setDetailEvent(e); setEditing(true); setShowDetail(true); setEditTitle(e.title); setEditStartTime(hhmmFromDate(new Date(e.start))); setEditEndTime(hhmmFromDate(new Date(e.end))); setEditColor(e.color || "#3f51b5"); setEditNotes(e.notes || ""); }}>
+                        ✏️
+                      </button>
+                      <button className="btn btn-sm btn-outline-danger" title="Eliminar" onClick={() => deleteEventById(e.id)}>
+                        🗑️
+                      </button>
+                    </div>
                   </div>
                 ))}
               {[...events].filter(e => inThisWeek(e.start)).length === 0 && (
@@ -507,14 +571,26 @@ export default function Agenda() {
               {[...tasks]
                 .filter(t => inThisWeek(t.start))
                 .map(t => (
-                  <div
-                    key={`tk-week-${t.id}`}
-                    className="small border rounded px-2 py-1 mb-2 d-flex align-items-center gap-2"
-                    title={t.taskDone ? "Hecha" : "Pendiente"}
-                    style={{ textDecoration: t.taskDone ? "line-through" : "none", fontStyle: t.taskDone ? "italic" : "normal" }}
-                  >
-                    <span style={{ width: 10, height: 10, borderRadius: 3, background: t.color || "#9aa0a6" }} />
-                    {format(new Date(t.start), "eee dd", { locale: es })} — {t.title}
+                  <div key={`tk-week-${t.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                    <div className="d-flex align-items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        checked={!!t.taskDone}
+                        onChange={() => toggleDoneTask(t)}
+                        title={t.taskDone ? "Marcar pendiente" : "Marcar hecha"}
+                      />
+                      <span style={{
+                        textDecoration: t.taskDone ? "line-through" : "none",
+                        fontStyle: t.taskDone ? "italic" : "normal"
+                      }}>
+                        {format(new Date(t.start), "eee dd", { locale: es })} — {t.title}
+                      </span>
+                    </div>
+                    <div className="d-flex gap-1">
+                      <button className="btn btn-sm btn-outline-primary" title="Editar" onClick={() => openEditTask(t)}>✏️</button>
+                      <button className="btn btn-sm btn-outline-danger" title="Eliminar" onClick={() => deleteTask(t)}>🗑️</button>
+                    </div>
                   </div>
                 ))}
               {[...tasks].filter(t => inThisWeek(t.start)).length === 0 && (
@@ -775,7 +851,13 @@ export default function Agenda() {
               </div>
               <div className="modal-body">
                 <div className="d-flex align-items-center gap-2 mb-2">
-                  <span style={{ width: 14, height: 14, borderRadius: 4, background: taskDetail.color || "#9aa0a6" }} />
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    checked={!!taskDetail.taskDone}
+                    onChange={() => toggleDoneTask(taskDetail)}
+                    title={taskDetail.taskDone ? "Marcar pendiente" : "Marcar hecha"}
+                  />
                   <h5 className="m-0" style={{ textDecoration: taskDetail.taskDone ? "line-through" : "none" }}>
                     {taskDetail.title}
                   </h5>
@@ -790,13 +872,57 @@ export default function Agenda() {
                   Cerrar
                 </button>
                 <div className="d-flex gap-2">
-                  <button className="btn btn-outline-primary" onClick={toggleDoneTask} disabled={taskMutating}>
-                    {taskDetail.taskDone ? "Marcar pendiente" : "Marcar hecha"}
+                  <button className="btn btn-outline-primary" onClick={() => openEditTask(taskDetail)} disabled={taskMutating}>
+                    Editar
                   </button>
-                  <button className="btn btn-danger" onClick={deleteTask} disabled={taskMutating}>
+                  <button className="btn btn-danger" onClick={() => deleteTask(taskDetail)} disabled={taskMutating}>
                     Eliminar
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar TAREA */}
+      {showTaskEdit && (
+        <div className="modal d-block" tabIndex="-1" role="dialog" style={{ background: "rgba(0,0,0,.35)" }}>
+          <div className="modal-dialog" role="document">
+            <div className="modal-content rounded-4 shadow">
+              <div className="modal-header">
+                <h5 className="modal-title">Editar tarea</h5>
+                <button type="button" className="btn-close" onClick={() => setShowTaskEdit(false)} disabled={taskEditSaving} aria-label="Close"></button>
+              </div>
+              <div className="modal-body">
+                <div className="mb-3">
+                  <label className="form-label">Título</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={taskEditTitle}
+                    onChange={e => setTaskEditTitle(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <div className="mb-3">
+                  <label className="form-label">Fecha</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={taskEditDate}
+                    onChange={e => setTaskEditDate(e.target.value)}
+                  />
+                </div>
+                {taskEditError && <div className="alert alert-danger mt-2 mb-0">{taskEditError}</div>}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-outline-secondary" onClick={() => setShowTaskEdit(false)} disabled={taskEditSaving}>
+                  Cancelar
+                </button>
+                <button className="btn btn-primary" onClick={saveEditTask} disabled={taskEditSaving}>
+                  {taskEditSaving ? "Guardando..." : "Guardar cambios"}
+                </button>
               </div>
             </div>
           </div>
