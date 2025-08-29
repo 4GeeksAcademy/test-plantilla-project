@@ -54,21 +54,21 @@ class Event(db.Model):
             "user_id": self.user_id
         }
 
-class Task(db.Model):
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    done: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
-    date: Mapped[Date] = mapped_column(nullable=True)  # día al que pertenece la tarea (opcional)
+# class Task(db.Model):
+#     id: Mapped[int] = mapped_column(primary_key=True)
+#     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
+#     title: Mapped[str] = mapped_column(String(200), nullable=False)
+#     done: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
+#     date: Mapped[Date] = mapped_column(nullable=True)  # día al que pertenece la tarea (opcional)
 
-    user = relationship("User")
-    tasks = relationship("Task", cascade="all, delete-orphan")
+#     user = relationship("User")
+#     tasks = relationship("Task", cascade="all, delete-orphan")
 
 
-    def serialize(self):
-        return {
-            "id": self.id,
-            "title": self.title,
-            "done": self.done,
-            "date": self.date.isoformat() if self.date else None
-        }
+#     def serialize(self):
+#         return {
+#             "id": self.id,
+#             "title": self.title,
+#             "done": self.done,
+#             "date": self.date.isoformat() if self.date else None
+#         }

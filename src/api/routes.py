@@ -3,7 +3,7 @@ API routes: auth (signup/login), private, events CRUD, tasks CRUD.
 """
 from flask import request, jsonify, Blueprint
 from flask_cors import cross_origin
-from api.models import db, User, Event, Task
+from api.models import db, User, Event #, Task
 from api.utils import APIException
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from datetime import datetime, timedelta, date
