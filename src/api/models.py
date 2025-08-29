@@ -1,19 +1,24 @@
+# src/api/models.py
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import String, Boolean, ForeignKey, DateTime, Date
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime, date as PyDate  # ← tipos Python para anotaciones
 
 db = SQLAlchemy()
 
 
 class User(db.Model):
+    __tablename__ = "user"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(nullable=False)  # se almacena hash
-    is_active: Mapped[bool] = mapped_column(Boolean(), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
 
-    # relación con eventos
+    # relaciones
     events = relationship("Event", back_populates="user", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="user", cascade="all, delete-orphan")
 
     # Helpers de seguridad
     def set_password(self, raw_password: str):
@@ -30,16 +35,20 @@ class User(db.Model):
 
 
 class Event(db.Model):
+    __tablename__ = "event"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(150), nullable=False)
-    start: Mapped[DateTime] = mapped_column(DateTime(timezone=False), nullable=False)
-    end: Mapped[DateTime] = mapped_column(DateTime(timezone=False), nullable=False)
-    all_day: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
-    color: Mapped[str] = mapped_column(String(20), nullable=True)     # ⬅️ color personalizado
-    notes: Mapped[str] = mapped_column(String(500), nullable=True)    # ⬅️ notas opcionales
 
-    # relación inversa
+    # Anotaciones con tipos Python; columnas con tipos SQLAlchemy:
+    start: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    end: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+
+    all_day: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
+    color: Mapped[str] = mapped_column(String(20), nullable=True)     # color personalizado
+    notes: Mapped[str] = mapped_column(String(500), nullable=True)    # notas opcionales
+
     user = relationship("User", back_populates="events")
 
     def serialize(self):
@@ -54,21 +63,25 @@ class Event(db.Model):
             "user_id": self.user_id
         }
 
-# class Task(db.Model):
-#     id: Mapped[int] = mapped_column(primary_key=True)
-#     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
-#     title: Mapped[str] = mapped_column(String(200), nullable=False)
-#     done: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
-#     date: Mapped[Date] = mapped_column(nullable=True)  # día al que pertenece la tarea (opcional)
 
-#     user = relationship("User")
-#     tasks = relationship("Task", cascade="all, delete-orphan")
+class Task(db.Model):
+    __tablename__ = "task"
 
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    done: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
 
-#     def serialize(self):
-#         return {
-#             "id": self.id,
-#             "title": self.title,
-#             "done": self.done,
-#             "date": self.date.isoformat() if self.date else None
-#         }
+    # Anotación Python (datetime.date) + columna SQLAlchemy Date:
+    date: Mapped[PyDate] = mapped_column(Date, nullable=True)
+
+    user = relationship("User", back_populates="tasks")
+
+    def serialize(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "done": self.done,
+            "date": self.date.isoformat() if self.date else None,
+            "user_id": self.user_id
+        }
