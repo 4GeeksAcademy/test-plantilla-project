@@ -1,38 +1,197 @@
+/* =========================
+   Minimal Pastel UI
+   ========================= */
 
-/* Fondo general */
-body { background: #f7f8fa; }
+/* Paleta */
+:root{
+  --bg: #f7f8fc;
+  --surface: #ffffff;
+  --muted: #8a9099;
+  --text: #1b1f24;
 
-/* Tarjetas redondeadas uniformes */
-.rounded-4 { border-radius: 1rem; }
+  --ring: rgba(60, 100, 255, .15);
+  --shadow: 0 8px 24px rgba(17,17,26,.05), 0 2px 8px rgba(17,17,26,.03);
 
-/* React Big Calendar – look limpio */
-.rbc-calendar {
-  background: #fff;
-  border-radius: 1rem;
+  /* Pasteles */
+  --p-blue: #dfe8ff;
+  --p-pink: #ffe3f0;
+  --p-lilac: #ece3ff;
+  --p-mint: #e7fff4;
+  --p-yellow: #fff6d7;
+  --p-gray: #eef0f3;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+
+body{
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Utilidades */
+.rounded-4{ border-radius: 16px; }
+.shadow-soft{ box-shadow: var(--shadow); }
+.card{ background: var(--surface); border: 1px solid rgba(0,0,0,.03); box-shadow: var(--shadow); }
+.card .card-body{ padding: 16px; }
+
+/* Botones */
+.btn{
+  border-radius: 999px !important;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  transition: transform .06s ease, box-shadow .2s ease, background .2s ease, color .2s ease;
+}
+.btn:focus{ box-shadow: 0 0 0 6px var(--ring) !important; }
+.btn:hover{ transform: translateY(-1px); }
+.btn:active{ transform: translateY(0); }
+.btn-primary{
+  background: #4f6cff;
+  border-color: #4f6cff;
+}
+.btn-outline-primary{
+  color: #4f6cff;
+  border-color: #cfd8ff;
+  background: #f4f6ff;
+}
+.btn-outline-primary:hover{ background:#e8edff; border-color:#bfcaff; color:#3b58ff; }
+.btn-danger{ background:#ff6b6b; border-color:#ff6b6b; }
+.btn-outline-danger{ color:#c75252; border-color:#ffd3d3; background:#fff0f0; }
+.btn-outline-danger:hover{ background:#ffe6e6; }
+
+/* Inputs */
+.form-control, .form-select{
+  border-radius: 12px;
+  border: 1px solid var(--p-gray);
+}
+.form-control:focus{
+  border-color:#b9c6ff;
+  box-shadow: 0 0 0 6px var(--ring);
+}
+
+/* Navbar */
+.navbar{
+  background: var(--surface) !important;
+  border-bottom: 1px solid rgba(0,0,0,.04);
+  box-shadow: var(--shadow);
+}
+
+/* ===== React Big Calendar ===== */
+.rbc-calendar{
+  background: var(--surface);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,.04);
+  box-shadow: var(--shadow);
+}
+
+/* Toolbar “segment control” */
+.rbc-toolbar{
+  padding: 10px 12px;
+  gap: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+.rbc-toolbar .rbc-btn-group{
+  display: inline-flex;
+  background: #f4f6ff;
+  border: 1px solid #e4e9ff;
+  border-radius: 999px;
   overflow: hidden;
 }
-.rbc-toolbar {
-  padding: 8px 12px;
-  gap: 8px;
-}
-.rbc-toolbar button {
-  border-radius: 10px;
-  padding: 6px 12px;
-}
-.rbc-month-view, .rbc-time-view, .rbc-agenda-view {
-  border-color: #eef0f3;
-}
-.rbc-header {
-  background: #fafbfc;
+.rbc-toolbar button{
   border: 0;
-  border-bottom: 1px solid #eef0f3;
-  padding: 8px 0;
+  background: transparent;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 500;
+  color: #4f5b76;
+}
+.rbc-toolbar button.rbc-active, .rbc-toolbar button:hover{
+  background: #e9edff;
+  color: #3649ff;
+}
+
+/* Cabeceras y grid */
+.rbc-month-view, .rbc-time-view, .rbc-agenda-view{ border-color: var(--p-gray); }
+.rbc-header{
+  background: #fbfcff;
+  border: 0;
+  border-bottom: 1px solid var(--p-gray);
+  padding: 10px 0;
   text-transform: capitalize;
+  font-weight: 600;
+  color: #5f6675;
 }
-.rbc-today { background: #f0f6ff; }
-.rbc-off-range-bg { background: #fafafa; }
-.rbc-date-cell { padding: 6px 8px; }
-.rbc-event {
-  border-radius: 8px;
-  padding: 2px 4px;
+.rbc-off-range-bg{ background: #fafbff; }
+.rbc-today{ background: #f0f4ff; }
+.rbc-date-cell{ padding: 6px 8px; color:#7a8191; }
+
+/* Eventos (pasteles + pill) */
+.rbc-event{
+  border-radius: 10px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  box-shadow: 0 4px 10px rgba(0,0,0,.04);
+  font-weight: 600;
+  opacity: .95;
 }
+.rbc-event.rbc-selected{ outline: none; box-shadow: 0 0 0 6px var(--ring); }
+
+/* Colores suaves por defecto (eventos) */
+.rbc-event{ background: var(--p-blue); color: #2d3b8f; border-color:#cdd9ff; }
+
+/* Hacer que tareas (que en tu app llegan con color) se vean “badge”: */
+.rbc-event[style*="9aa0a6"], /* gris tareas pendientes */
+.rbc-event[style*="#9aa0a6"]{
+  background: var(--p-gray) !important;
+  color: #5f6675 !important;
+  border-color: #dde1e6 !important;
+}
+.rbc-event[style*="6c9c7b"], /* verde tareas done */
+.rbc-event[style*="#6c9c7b"]{
+  background: var(--p-mint) !important;
+  color: #2d6a4f !important;
+  border-color: #ccebdc !important;
+}
+
+/* Popups */
+.rbc-overlay{
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,.06);
+  box-shadow: var(--shadow);
+}
+
+/* Etiquetas “+N más” */
+.rbc-show-more{
+  color:#6b76ff;
+  font-weight: 600;
+}
+
+/* ===== Panel derecho (Hoy / Semana / Sin fecha) ===== */
+.panel-card{
+  background: var(--surface);
+  border: 1px solid rgba(0,0,0,.04);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.panel-card h5{
+  font-weight: 700;
+}
+.badge-dot{
+  width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+}
+
+/* Listitas compactas */
+.item-row{
+  font-size: 0.92rem;
+  border: 1px solid var(--p-gray);
+  border-radius: 12px;
+  padding: 6px 10px;
+}
+
+/* Pequeñas ayudas visuales */
+.text-muted{ color: var(--muted) !important; }

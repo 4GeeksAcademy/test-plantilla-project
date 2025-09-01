@@ -1,5 +1,9 @@
 """
 API routes: auth (signup/login), private, events CRUD, tasks CRUD.
+Incluye:
+- /api/events/batch   → creación de múltiples eventos (uno por día)
+- /api/tasks/<id>/toggle → toggle de tarea (hecha/pendiente)
+- /api/calendar       → feed unificado (eventos + tareas como all-day)
 """
 from flask import request, jsonify, Blueprint
 from flask_cors import cross_origin
@@ -39,6 +43,14 @@ def _parse_date_yyyy_mm_dd(s: str) -> date:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         raise APIException("Invalid date (expected YYYY-MM-DD)", 400)
+
+# Check de solapes (opcional pero útil)
+from sqlalchemy import and_
+def _overlaps(uid: int, start: datetime, end: datetime, exclude_id: int | None = None) -> bool:
+    q = Event.query.filter_by(user_id=uid).filter(and_(Event.start < end, Event.end > start))
+    if exclude_id:
+        q = q.filter(Event.id != exclude_id)
+    return q.first() is not None
 
 # -------------------- Demo --------------------
 
@@ -112,7 +124,7 @@ def private():
 @api.route('/events', methods=['GET', 'POST', 'OPTIONS'])
 @cross_origin(origins="*", methods=["GET", "POST", "OPTIONS"],
               allow_headers=["Content-Type", "Authorization"])
-@jwt_required(optional=True)  # el preflight/GET sin token no debería bloquear en DEV; si quieres exigir token, quita 'optional'
+@jwt_required(optional=True)  # si quieres exigir token para GET, quita 'optional'
 def events_collection():
     if request.method == "OPTIONS":
         return ("", 204)
@@ -137,6 +149,10 @@ def events_collection():
 
     if end <= start:
         raise APIException("end must be greater than start", 400)
+
+    # opcional: bloquear solapes
+    # if _overlaps(uid, start, end):
+    #     raise APIException("Event overlaps with another one", 409)
 
     ev = Event(
         user_id=uid,
@@ -186,6 +202,8 @@ def event_item(event_id):
     if ('start' in data) or ('end' in data):
         if ev.end <= ev.start:
             raise APIException("end must be greater than start", 400)
+        # if _overlaps(uid, ev.start, ev.end, exclude_id=ev.id):
+        #     raise APIException("Event overlaps with another one", 409)
 
     if 'allDay' in data:
         ev.all_day = bool(data['allDay'])
@@ -196,6 +214,77 @@ def event_item(event_id):
 
     db.session.commit()
     return jsonify(ev.serialize()), 200
+
+# --------- NUEVO: batch de eventos (uno por día) ---------
+
+@api.route('/events/batch', methods=['POST', 'OPTIONS'])
+@cross_origin(origins="*", methods=["POST", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
+@jwt_required()
+def events_batch():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    uid = _uid()
+    data = request.get_json() or {}
+
+    title = (data.get('title') or '').strip()
+    if not title:
+        raise APIException("Title is required", 400)
+
+    try:
+        start_day_str = data['startDay']   # "YYYY-MM-DD"
+        end_day_str   = data['endDay']     # "YYYY-MM-DD" (inclusive)
+        start_hhmm    = data['startTime']  # "HH:MM"
+        end_hhmm      = data['endTime']    # "HH:MM"
+    except KeyError:
+        raise APIException("startDay, endDay, startTime, endTime are required", 400)
+
+    # validar horas
+    try:
+        sh, sm = [int(x) for x in start_hhmm.split(":")]
+        eh, em = [int(x) for x in end_hhmm.split(":")]
+    except Exception:
+        raise APIException("Invalid time (use HH:MM)", 400)
+
+    if (eh, em) <= (sh, sm):
+        raise APIException("endTime must be greater than startTime", 400)
+
+    # rango de días
+    from datetime import timedelta as TD
+    try:
+        s_day = datetime.strptime(start_day_str, "%Y-%m-%d").date()
+        e_day = datetime.strptime(end_day_str, "%Y-%m-%d").date()
+    except Exception:
+        raise APIException("Days must be YYYY-MM-DD", 400)
+
+    if e_day < s_day:
+        raise APIException("endDay must be >= startDay", 400)
+
+    created = []
+    cur = s_day
+    while cur <= e_day:
+        start_dt = datetime(cur.year, cur.month, cur.day, sh, sm, 0)
+        end_dt   = datetime(cur.year, cur.month, cur.day, eh, em, 0)
+
+        # if _overlaps(uid, start_dt, end_dt):
+        #     cur += TD(days=1); continue  # o lanza 409 si prefieres estricta
+
+        ev = Event(
+            user_id=uid,
+            title=title,
+            start=start_dt,
+            end=end_dt,
+            all_day=False,
+            color=data.get('color'),
+            notes=data.get('notes')
+        )
+        db.session.add(ev)
+        created.append(ev)
+        cur += TD(days=1)
+
+    db.session.commit()
+    return jsonify([e.serialize() for e in created]), 201
 
 # -------------------- Tasks CRUD --------------------
 
@@ -266,3 +355,70 @@ def task_item(task_id):
 
     db.session.commit()
     return jsonify(t.serialize()), 200
+
+# --------- NUEVO: toggle de tarea ---------
+
+@api.route('/tasks/<int:task_id>/toggle', methods=['POST', 'OPTIONS'])
+@cross_origin(origins="*", methods=["POST", "OPTIONS"],
+              allow_headers=["Content-Type", "Authorization"])
+@jwt_required()
+def task_toggle(task_id):
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    uid = _uid()
+    t = Task.query.filter_by(id=task_id, user_id=uid).first()
+    if not t:
+        raise APIException("Task not found", 404)
+    t.done = not bool(t.done)
+    db.session.commit()
+    return jsonify(t.serialize()), 200
+
+# --------------- NUEVO: feed unificado ---------------
+
+@api.route('/calendar', methods=['GET'])
+@cross_origin(origins="*", methods=["GET"],
+              allow_headers=["Content-Type", "Authorization"])
+@jwt_required()
+def calendar_feed():
+    uid = _uid()
+
+    # Rango opcional por query ?from=YYYY-MM-DD&to=YYYY-MM-DD
+    from datetime import timedelta as TD
+    dfrom = request.args.get("from")
+    dto   = request.args.get("to")
+
+    q_events = Event.query.filter_by(user_id=uid)
+    q_tasks  = Task.query.filter_by(user_id=uid)
+
+    if dfrom:
+        s = datetime.strptime(dfrom, "%Y-%m-%d")
+        q_events = q_events.filter(Event.start >= s)
+        q_tasks  = q_tasks.filter(Task.date >= s.date())
+    if dto:
+        e = datetime.strptime(dto, "%Y-%m-%d") + TD(days=1)  # exclusivo
+        q_events = q_events.filter(Event.start < e)
+        q_tasks  = q_tasks.filter(Task.date < e.date())
+
+    evs = [e.serialize() | {"isTask": False, "taskDone": False} for e in q_events.order_by(Event.start.asc()).all()]
+
+    tasks = []
+    for t in q_tasks.order_by(Task.id.desc()).all():
+        if t.date is None:
+            continue
+        sdt = datetime(t.date.year, t.date.month, t.date.day, 0, 0, 0)
+        edt = sdt + TD(days=1)
+        tasks.append({
+            "id": t.id,
+            "title": t.title,
+            "start": sdt.isoformat(),
+            "end": edt.isoformat(),
+            "allDay": True,
+            "color": "#6c9c7b" if t.done else "#9aa0a6",
+            "notes": None,
+            "user_id": t.user_id,
+            "isTask": True,
+            "taskDone": bool(t.done)
+        })
+
+    return jsonify(evs + tasks), 200

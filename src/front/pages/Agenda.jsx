@@ -114,45 +114,18 @@ export default function Agenda() {
   const [taskEditSaving, setTaskEditSaving] = useState(false);
   const [taskEditError, setTaskEditError] = useState("");
 
-  // ------- LOAD DATA -------
-  const loadEvents = async () => {
-    const res = await apiFetch("/api/events");
-    if (!res) return [];
-    const data = await res.json().catch(() => []);
-    if (!Array.isArray(data)) return [];
-    return data.map(e => ({ ...e, start: new Date(e.start), end: new Date(e.end), isTask: false }));
-  };
-
-  const loadTasks = async () => {
-    const res = await apiFetch("/api/tasks");
-    if (!res) return [];
-    const data = await res.json().catch(() => []);
-    if (!Array.isArray(data)) return [];
-    // Mapear tareas a eventos all-day (end = start + 1 día para RBC)
-    return data.map(t => {
-      const start = startOfDayLocal(new Date(t.date ?? new Date()));
-      const end = addDays(start, 1);
-      return {
-        id: t.id,
-        title: t.title,
-        start,
-        end,
-        allDay: true,
-        color: t.done ? "#6c9c7b" : "#9aa0a6", // hecho: verde suave, pendiente: gris
-        notes: null,
-        user_id: t.user_id,
-        isTask: true,
-        taskDone: !!t.done,
-        _rawTask: t
-      };
-    });
-  };
-
+  // ------- LOAD DATA (ahora /api/calendar) -------
   const loadAll = async () => {
     setLoading(true);
-    const [evs, tks] = await Promise.all([loadEvents(), loadTasks()]);
-    setEvents(evs);
-    setTasks(tks);
+    const res = await apiFetch("/api/calendar");
+    const raw = await res?.json().catch(() => []) || [];
+    const normalized = (Array.isArray(raw) ? raw : []).map(it => ({
+      ...it,
+      start: new Date(it.start),
+      end: new Date(it.end),
+    }));
+    setEvents(normalized.filter(x => !x.isTask));
+    setTasks(normalized.filter(x => x.isTask));
     setLoading(false);
   };
 
@@ -222,7 +195,7 @@ export default function Agenda() {
     setShowTaskModal(true);
   };
 
-  // ---------- Crear eventos ----------
+  // ---------- Crear eventos (ahora batch en backend) ----------
   const createEvents = async () => {
     setFormError("");
     if (!title.trim()) return setFormError("Escribe un título.");
@@ -234,21 +207,18 @@ export default function Agenda() {
 
     setCreating(true);
     try {
-      await Promise.all(selectedDays.map(day => {
-        const start = withTime(day, startTime);
-        const end = withTime(day, endTime);
-        return apiFetch("/api/events", {
-          method: "POST",
-          body: JSON.stringify({
-            title: title.trim(),
-            start: start.toISOString(),
-            end: end.toISOString(),
-            allDay: false,
-            color,
-            notes
-          })
-        });
-      }));
+      await apiFetch("/api/events/batch", {
+        method: "POST",
+        body: JSON.stringify({
+          title: title.trim(),
+          startDay: ymd(selectedDays[0]),
+          endDay: ymd(selectedDays[selectedDays.length - 1]),
+          startTime,
+          endTime,
+          color,
+          notes
+        })
+      });
       await loadAll();
       setShowModal(false);
     } catch {
@@ -377,11 +347,7 @@ export default function Agenda() {
   // ---------- TAREAS: toggle / delete / edit ----------
   const toggleDoneTask = async (task) => {
     const id = task?.id ?? taskDetail?.id;
-    const next = !(task?.taskDone ?? taskDetail?.taskDone);
-    await apiFetch(`/api/tasks/${id}`, {
-      method: "PUT",
-      body: JSON.stringify({ done: next })
-    });
+    await apiFetch(`/api/tasks/${id}/toggle`, { method: "POST" });
     await loadAll();
     setShowTaskInfo(false);
     setTaskDetail(null);
@@ -446,7 +412,7 @@ export default function Agenda() {
       <div className="row g-4">
         {/* Calendario */}
         <div className="col-lg-8">
-          <div className="card shadow-sm rounded-4 overflow-hidden">
+          <div className="card shadow-soft rounded-4 overflow-hidden">
             <div className="card-body p-2">
               <Calendar
                 localizer={localizer}
@@ -478,7 +444,7 @@ export default function Agenda() {
         {/* Panel derecho */}
         <div className="col-lg-4">
           {/* HOY */}
-          <div className="card shadow-sm rounded-4 mb-4">
+          <div className="panel-card rounded-4 mb-4">
             <div className="card-body">
               <h5 className="mb-3">Hoy</h5>
 
@@ -487,9 +453,9 @@ export default function Agenda() {
               {[...events]
                 .filter(e => isSameDay(e.start, new Date()))
                 .map(e => (
-                  <div key={`ev-hoy-${e.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                  <div key={`ev-hoy-${e.id}`} className="item-row d-flex align-items-center justify-content-between mb-2">
                     <div className="d-flex align-items-center gap-2">
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: e.color || "#3f51b5" }} />
+                      <span className="badge-dot" style={{ background: e.color || "#3f51b5" }} />
                       <span>{format(new Date(e.start), "HH:mm")} — {e.title}</span>
                     </div>
                     <div className="d-flex gap-1">
@@ -511,7 +477,7 @@ export default function Agenda() {
               {[...tasks]
                 .filter(t => isSameDay(t.start, new Date()))
                 .map(t => (
-                  <div key={`tk-hoy-${t.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                  <div key={`tk-hoy-${t.id}`} className="item-row d-flex align-items-center justify-content-between mb-2">
                     <div className="d-flex align-items-center gap-2">
                       <input
                         type="checkbox"
@@ -538,7 +504,7 @@ export default function Agenda() {
           </div>
 
           {/* ESTA SEMANA */}
-          <div className="card shadow-sm rounded-4">
+          <div className="panel-card rounded-4">
             <div className="card-body">
               <h5 className="mb-3">Esta semana</h5>
 
@@ -547,9 +513,9 @@ export default function Agenda() {
               {[...events]
                 .filter(e => inThisWeek(e.start))
                 .map(e => (
-                  <div key={`ev-week-${e.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                  <div key={`ev-week-${e.id}`} className="item-row d-flex align-items-center justify-content-between mb-2">
                     <div className="d-flex align-items-center gap-2">
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: e.color || "#3f51b5" }} />
+                      <span className="badge-dot" style={{ background: e.color || "#3f51b5" }} />
                       <span>{format(new Date(e.start), "eee dd HH:mm", { locale: es })} — {e.title}</span>
                     </div>
                     <div className="d-flex gap-1">
@@ -571,7 +537,7 @@ export default function Agenda() {
               {[...tasks]
                 .filter(t => inThisWeek(t.start))
                 .map(t => (
-                  <div key={`tk-week-${t.id}`} className="small border rounded px-2 py-1 mb-2 d-flex align-items-center justify-content-between">
+                  <div key={`tk-week-${t.id}`} className="item-row d-flex align-items-center justify-content-between mb-2">
                     <div className="d-flex align-items-center gap-2">
                       <input
                         type="checkbox"
