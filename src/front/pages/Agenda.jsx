@@ -56,13 +56,36 @@ const inThisWeek = (d) => {
   const end = addDays(start, 7);
   return date >= start && date < end;
 };
+
+// Texto superior: “Hoy es sábado, 25 de agosto a las 20:47”
+const fmtTop = (d) => {
+  const hoy = new Date();
+  const isToday = d.toDateString() === hoy.toDateString();
+  const prefix = isToday ? "Hoy es " : "Fecha: ";
+  const dia = format(d, "eeee, d 'de' MMMM", { locale: es });
+  const hora = format(d, "HH:mm");
+  return `${prefix}${dia} a las ${hora}`;
+};
 // ---------------------------------------
 
 export default function Agenda() {
+  // ---- Reloj en vivo (actualiza cada 30s) ----
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   // ---- DATA ----
   const [events, setEvents] = useState([]);
-  const [tasks, setTasks] = useState([]);
+  const [tasks, setTasks] = useState([]); // con fecha (mapeadas a all-day)
   const [loading, setLoading] = useState(true);
+
+  // ---- TAREAS SIN FECHA ----
+  const [undated, setUndated] = useState([]); // {id,title,done,user_id}
+  const [undatedInput, setUndatedInput] = useState("");
+  const [undatedSaving, setUndatedSaving] = useState(false);
+  const [undatedError, setUndatedError] = useState("");
 
   // ---- ELECCIÓN Evento/Tarea ----
   const [showChoice, setShowChoice] = useState(false);
@@ -114,9 +137,8 @@ export default function Agenda() {
   const [taskEditSaving, setTaskEditSaving] = useState(false);
   const [taskEditError, setTaskEditError] = useState("");
 
-  // ------- LOAD DATA (ahora /api/calendar) -------
-  const loadAll = async () => {
-    setLoading(true);
+  // ------- LOAD DATA -------
+  const loadCalendarFeed = async () => {
     const res = await apiFetch("/api/calendar");
     const raw = await res?.json().catch(() => []) || [];
     const normalized = (Array.isArray(raw) ? raw : []).map(it => ({
@@ -126,6 +148,21 @@ export default function Agenda() {
     }));
     setEvents(normalized.filter(x => !x.isTask));
     setTasks(normalized.filter(x => x.isTask));
+  };
+
+  const loadUndated = async () => {
+    const res = await apiFetch("/api/tasks");
+    const data = await res?.json().catch(() => []) || [];
+    // Filtrar sin fecha (date == null)
+    const und = data.filter(t => !t.date).map(t => ({
+      id: t.id, title: t.title, done: !!t.done, user_id: t.user_id
+    }));
+    setUndated(und);
+  };
+
+  const loadAll = async () => {
+    setLoading(true);
+    await Promise.all([loadCalendarFeed(), loadUndated()]);
     setLoading(false);
   };
 
@@ -195,7 +232,7 @@ export default function Agenda() {
     setShowTaskModal(true);
   };
 
-  // ---------- Crear eventos (ahora batch en backend) ----------
+  // ---------- Crear eventos (batch backend) ----------
   const createEvents = async () => {
     setFormError("");
     if (!title.trim()) return setFormError("Escribe un título.");
@@ -365,7 +402,8 @@ export default function Agenda() {
   const openEditTask = (task) => {
     setTaskEditId(task.id);
     setTaskEditTitle(task.title);
-    setTaskEditDate(ymd(task.start));
+    // Si viene de "Sin fecha", no tendrá start -> fecha ""
+    setTaskEditDate(task.start ? ymd(task.start) : "");
     setTaskEditError("");
     setShowTaskEdit(true);
   };
@@ -378,9 +416,13 @@ export default function Agenda() {
     }
     setTaskEditSaving(true);
     try {
+      const payload = { title: taskEditTitle.trim() };
+      // Si taskEditDate está vacío => dejamos sin fecha (null)
+      payload.date = taskEditDate || null;
+
       const res = await apiFetch(`/api/tasks/${taskEditId}`, {
         method: "PUT",
-        body: JSON.stringify({ title: taskEditTitle.trim(), date: taskEditDate })
+        body: JSON.stringify(payload)
       });
       if (res?.ok) {
         await loadAll();
@@ -395,6 +437,30 @@ export default function Agenda() {
     }
   };
 
+  // ---------- SIN FECHA: crear ----------
+  const addUndated = async () => {
+    setUndatedError("");
+    const t = undatedInput.trim();
+    if (!t) { setUndatedError("Escribe una tarea."); return; }
+    setUndatedSaving(true);
+    try {
+      const res = await apiFetch("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({ title: t }) // sin date
+      });
+      if (!res?.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.message || "No se pudo crear la tarea.");
+      }
+      setUndatedInput("");
+      await loadAll();
+    } catch (e) {
+      setUndatedError(e.message || "Error al crear tarea.");
+    } finally {
+      setUndatedSaving(false);
+    }
+  };
+
   // -------- Formatos para modal --------
   const fmtDia = (d) => format(d, "eeee d 'de' MMMM, yyyy", { locale: es });
   const fmtHora = (d) => format(d, "HH:mm");
@@ -403,7 +469,10 @@ export default function Agenda() {
   return (
     <div className="container py-3">
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h3 className="fw-semibold mb-0">Eventos y tareas</h3>
+        <div>
+          <div className="text-muted small">{fmtTop(now)}</div>
+          <h3 className="fw-semibold mb-0">Eventos y tareas</h3>
+        </div>
         <button className="btn btn-outline-secondary" onClick={loadAll} disabled={loading}>
           {loading ? "Cargando..." : "Refrescar"}
         </button>
@@ -504,7 +573,7 @@ export default function Agenda() {
           </div>
 
           {/* ESTA SEMANA */}
-          <div className="panel-card rounded-4">
+          <div className="panel-card rounded-4 mb-4">
             <div className="card-body">
               <h5 className="mb-3">Esta semana</h5>
 
@@ -564,6 +633,61 @@ export default function Agenda() {
               )}
             </div>
           </div>
+
+          {/* SIN FECHA */}
+          <div className="panel-card rounded-4">
+            <div className="card-body">
+              <h5 className="mb-3">Sin fecha</h5>
+
+              {/* Input para agregar */}
+              <div className="d-flex gap-2">
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Nueva tarea (sin fecha)"
+                  value={undatedInput}
+                  onChange={e => setUndatedInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addUndated(); } }}
+                />
+                <button className="btn btn-outline-primary" onClick={addUndated} disabled={undatedSaving}>
+                  {undatedSaving ? "Agregando..." : "Agregar"}
+                </button>
+              </div>
+              {undatedError && <div className="alert alert-danger mt-2 mb-0">{undatedError}</div>}
+
+              {/* Lista */}
+              <div className="mt-3">
+                {undated.length === 0 && <div className="text-muted small">No hay tareas sin fecha.</div>}
+                {undated.map(t => (
+                  <div key={`tk-und-${t.id}`} className="item-row d-flex align-items-center justify-content-between mb-2">
+                    <div className="d-flex align-items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        checked={!!t.done}
+                        onChange={() => toggleDoneTask({ id: t.id })}
+                        title={t.done ? "Marcar pendiente" : "Marcar hecha"}
+                      />
+                      <span style={{
+                        textDecoration: t.done ? "line-through" : "none",
+                        fontStyle: t.done ? "italic" : "normal"
+                      }}>{t.title}</span>
+                    </div>
+                    <div className="d-flex gap-1">
+                      {/* Al editar, reusamos el modal y permitimos asignar fecha */}
+                      <button className="btn btn-sm btn-outline-primary" title="Asignar fecha / Editar" onClick={() => openEditTask({ id: t.id, title: t.title, start: null })}>✏️</button>
+                      <button className="btn btn-sm btn-outline-danger" title="Eliminar" onClick={() => deleteTask({ id: t.id })}>🗑️</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-muted small mt-2">
+                Consejo: edita una tarea para asignarle una fecha y aparecerá en el calendario.
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -878,7 +1002,9 @@ export default function Agenda() {
                     className="form-control"
                     value={taskEditDate}
                     onChange={e => setTaskEditDate(e.target.value)}
+                    placeholder="(vacío = sin fecha)"
                   />
+                  <div className="form-text">Deja vacío para mantener la tarea sin fecha.</div>
                 </div>
                 {taskEditError && <div className="alert alert-danger mt-2 mb-0">{taskEditError}</div>}
               </div>
