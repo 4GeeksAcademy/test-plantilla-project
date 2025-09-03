@@ -1,6 +1,6 @@
 # src/api/models.py
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import String, Boolean, ForeignKey, DateTime, Date
+from sqlalchemy import String, Boolean, ForeignKey, DateTime, Date, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date as PyDate  # ← tipos Python para anotaciones
